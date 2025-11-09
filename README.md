@@ -15,7 +15,7 @@ Source Code of the Silk Forum Backend using Flask and SQLite3.
 - `python3`
 - `flask`
 
-## Running the app
+### Running the app
 To run the app, type in the following command:
 ```
 flask run
@@ -23,7 +23,7 @@ flask run
 
 Next, it will ask you to enter an admin password which will be added to the database.
 
-# 🗺️ Routes
+## 🗺️ Routes
 - `GET /` : Returns a welcome message
 - `GET /accounts/` : Returns every user in the database
 - `GET /post/` : Returns every post in the database
