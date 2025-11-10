@@ -90,14 +90,14 @@ def post():
         body = data["body"]
         token = data["token"]
 
-        # Check if the user is signed in
+        # Check if the user is logged in
         db = sqlite3.connect("accounts.db")
         cur = db.cursor()
         res = cur.execute("SELECT * FROM sessions WHERE user=?", (username,))
         final = res.fetchone()
 
         if final != None:
-            if final[1] == token or time.time() > final[2]:
+            if final[1] == token and time.time() < final[2]:
                 db = sqlite3.connect("posts.db")
                 cur = db.cursor()
                 res = cur.execute("INSERT INTO posts VALUES (?,?,?,?)", (get_Amount_of_Posts()+1, username, title, body))
@@ -108,7 +108,7 @@ def post():
             else:
                 return "Wrong Login credentials", 401
         else:
-            return "User does not exist", 401
+            return "User does not exist", 404
     else:
         post_id = request.args.get("id")
         if post_id != None:
