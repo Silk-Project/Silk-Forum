@@ -56,10 +56,10 @@ res = acc_cur.execute("SELECT * FROM accounts")
 
 if len(res.fetchall()) == 0:
     admin_password = hash_string(input("Admin Password: "))
-    acc_cur.execute(f"
+    acc_cur.execute(f"""
         INSERT INTO accounts VALUES
         ("admin", "{admin_password}")
-    ")
+    """)
     acc_db.commit()
 
 acc_db.close()
@@ -77,6 +77,26 @@ app = Flask(__name__)
 def default():
     return "Welcome to the Silk Forum Root"
 
+@app.route("/validate/", methods=['GET'])
+def validate():
+    data = request.json
+    token = data["token"]
+
+    db = sqlite3.connect("accounts.db")
+    cur = db.cursor()
+    res = cur.execute("SELECT * FROM sessions WHERE token=?", token)
+    final = res.fetchone()
+
+    if final[1] == token and time.time() < final[2]:
+        return {
+            "status":"Success",
+            "username":final[0]
+        }
+    else:
+        return {
+            "status":"Invalid Token"
+        }, 403
+
 @app.route("/accounts/", methods=['GET'])
 def accounts():
     return get_accounts()
@@ -85,37 +105,50 @@ def accounts():
 def post():
     if request.method == "POST":
         data = request.json
-        username = data["user"]
         title = data["title"]
         body = data["body"]
         token = data["token"]
 
+        if not token:
+            return {
+                "status":"Token is missing"
+            }, 400
+
         # Check if the user is logged in
         db = sqlite3.connect("accounts.db")
         cur = db.cursor()
-        res = cur.execute("SELECT * FROM sessions WHERE user=?", (username,))
+        res = cur.execute("SELECT * FROM sessions WHERE token=?", (token))
         final = res.fetchone()
 
         if final != None:
             if final[1] == token and time.time() < final[2]:
                 db = sqlite3.connect("posts.db")
                 cur = db.cursor()
-                res = cur.execute("INSERT INTO posts VALUES (?,?,?,?)", (get_Amount_of_Posts()+1, username, title, body))
+                res = cur.execute("INSERT INTO posts VALUES (?,?,?,?)", (get_Amount_of_Posts()+1, final[0], title, body))
                 db.commit()
                 res.close()
-                print(f"{username} created a post")
-                return "Success"
+                print(f"{final[0]} created a post")
+                return {
+                    "status":"Success"
+                }
             else:
-                return "Wrong Login credentials", 401
+                return {
+                    "status":"Invalid Token"
+                }, 403
         else:
-            return "User does not exist", 404
+            return {
+                "status":"No Token found"
+            }, 404
+        
     else:
         post_id = request.args.get("id")
         if post_id != None:
             try:
                 post_id = int(post_id)
             except:
-                return "Post ID is in an invalid format", 400
+                return {
+                    "status":"Post ID is in an invalid format"
+                }, 400
             
             db = sqlite3.connect("posts.db")
             cur = db.cursor()
@@ -128,7 +161,9 @@ def post():
                     "post":post
                 }
             else:
-                return "Post Not Found", 404
+                return {
+                    "status":"Post not found"
+                }, 404
 
         else:
             return get_posts()
@@ -169,9 +204,13 @@ def login():
                 "token":token
             }
         else:
-            return "Wrong Login credentials", 401
+            return {
+                "status":"Wrong Login credentials"
+            }, 403
     else:
-        return "No Such Account", 401
+        return {
+            "status":"No such account"
+        }, 404
 
 @app.route("/register/", methods=['POST'])
 def register():
@@ -192,9 +231,12 @@ def register():
         print("Account Added.")
         return redirect(url_for("accounts")) # Placeholder
     else:
-        return "Bad Request, Missing", 400
+        return {
+            "status":"Login credentials are missing"
+        }, 400
     
 @app.errorhandler(404)
 def page_not_found(error):
-    #return render_template('not_found.html'), 404
-    return "Not Found", 404
+    return {
+        "status":"Not Found",
+    }, 404
