@@ -21,12 +21,13 @@ To run the app, type in the following command:
 flask run
 ```
 
-Next, it will ask you to enter an admin password which will be added to the database.
+Next, it will ask you to enter an admin password which will be added to the `accounts.db` database.
 
 ## 🗺️ Routes
 - `GET /` : Returns a welcome message
-- `GET /accounts/` : Returns every user in the database
-- `GET /post/` : Returns every post in the database
+- `GET /validate/` : Checks if a user is logged in using a token, returns a status if it is valid or not
+- `GET /accounts/` : Returns every user in the `accounts.db` database
+- `GET /post/` : Returns every post in the `posts.db` database
 - `GET /post/<id>` : Returns a post with a specific id
 - `POST /post/` : Adds a post to the database using a username, title and body
 - `POST /register/` : Registers a new user using a username and password
