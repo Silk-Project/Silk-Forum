@@ -1,4 +1,5 @@
 from flask import Flask, request, redirect, abort, url_for, render_template
+from flask_cors import CORS
 import sqlite3
 import hashlib
 import time
@@ -8,7 +9,7 @@ def hash_string(passwd):
     return hashlib.sha256(passwd.encode('utf-8')).hexdigest()
 
 def gen_Token(user, time):
-    return f"{hash_string(user)}/{str(int(time))}"
+    return hash_string(f"{hash_string(user)}{str(int(time))}")
 
 def get_Amount_of_Posts():
     posts = sqlite3.connect("posts.db")
@@ -34,6 +35,14 @@ def get_accounts():
     cur.close()
     return final
 
+def get_Amount_of_Users():
+    accounts = sqlite3.connect("accounts.db")
+    cur = accounts.cursor()
+    res = cur.execute("SELECT * FROM accounts")
+    final = res.fetchall()
+    cur.close()
+    return len(final)
+
 def user_exists(user):
     accounts = sqlite3.connect("accounts.db")
     cur = accounts.cursor()
@@ -49,7 +58,7 @@ def user_exists(user):
 # Initialize the accounts database
 acc_db = sqlite3.connect("accounts.db")
 acc_cur = acc_db.cursor()
-acc_cur.execute("CREATE TABLE IF NOT EXISTS accounts(user, password)")
+acc_cur.execute("CREATE TABLE IF NOT EXISTS accounts(id, user, password)")
 acc_cur.execute("CREATE TABLE IF NOT EXISTS sessions(user, token, expires)")
 
 res = acc_cur.execute("SELECT * FROM accounts")
@@ -58,7 +67,7 @@ if len(res.fetchall()) == 0:
     admin_password = hash_string(input("Admin Password: "))
     acc_cur.execute(f"""
         INSERT INTO accounts VALUES
-        ("admin", "{admin_password}")
+        (1, "admin", "{admin_password}")
     """)
     acc_db.commit()
 
@@ -72,20 +81,33 @@ p_cur.close()
 
 # Initialize Flask App
 app = Flask(__name__)
+CORS(app)
 
 @app.route("/", methods=['POST', 'GET'])
 def default():
     return "Welcome to the Silk Forum Root"
 
-@app.route("/validate/", methods=['GET'])
+@app.route("/validate/", methods=['POST'])
 def validate():
     data = request.json
     token = data["token"]
+    print(token)
+
+    if not token:
+        return {
+            "status":"No Token Requested"
+        }, 400
 
     db = sqlite3.connect("accounts.db")
     cur = db.cursor()
-    res = cur.execute("SELECT * FROM sessions WHERE token=?", token)
+    res = cur.execute("SELECT * FROM sessions WHERE token=?", (token,))
     final = res.fetchone()
+    db.close()
+
+    if final == None:
+        return {
+            "status":"Invalid Token"
+        }, 403
 
     if final[1] == token and time.time() < final[2]:
         return {
@@ -94,12 +116,39 @@ def validate():
         }
     else:
         return {
-            "status":"Invalid Token"
+            "status":"Expired Token"
         }, 403
 
 @app.route("/accounts/", methods=['GET'])
 def accounts():
-    return get_accounts()
+    account_id = request.args.get("id")
+    if account_id != None:
+        try:
+            account_id = int(account_id)
+        except:
+            return {
+                "status":"Account ID is in an invalid format"
+            }, 400
+        
+        db = sqlite3.connect("accounts.db")
+        cur = db.cursor()
+        res = cur.execute("SELECT * FROM accounts WHERE id=?", (account_id,))
+        account = res.fetchone()
+
+        if account != None:
+            return {
+                "status":"Success",
+                "account":account
+            }
+        else:
+            return {
+                "status":"User not found"
+            }, 404
+    else:
+        return get_accounts()
+
+        
+
 
 @app.route("/post/", methods=['POST', 'GET'])
 def post():
@@ -133,11 +182,11 @@ def post():
                 }
             else:
                 return {
-                    "status":"Invalid Token"
+                    "status":"Invalid token"
                 }, 403
         else:
             return {
-                "status":"No Token found"
+                "status":"No token found"
             }, 404
         
     else:
@@ -170,7 +219,7 @@ def post():
         
 @app.route("/login/", methods=['POST'])
 def login():
-    data = request.form
+    data = request.json
     username = data["user"]
     password = data["password"]
 
@@ -205,7 +254,7 @@ def login():
             }
         else:
             return {
-                "status":"Wrong Login credentials"
+                "status":"Wrong login credentials"
             }, 403
     else:
         return {
@@ -214,22 +263,30 @@ def login():
 
 @app.route("/register/", methods=['POST'])
 def register():
-    data = request.form
+    data = request.json
     username = data["user"]
     password = data["password"]
 
     if username and password:
         if user_exists(username):
-            return "Bad Request, Exists", 400
+            return {
+                "status":"Account already exists"
+            }, 400
+        elif len(username) < 5 or len(password) < 5:
+            return {
+                "status":"Username and password should include at least 5 characters"
+            }, 400
 
         print(f"Request from {username} at Register")
         print(hash_string(password))
         db = sqlite3.connect("accounts.db")
         cur = db.cursor()
-        cur.execute("INSERT INTO accounts VALUES (?, ?)", (username, hash_string(password)))
+        cur.execute("INSERT INTO accounts VALUES (?, ?, ?)", (get_Amount_of_Users()+1, username, hash_string(password),))
         db.commit()
         print("Account Added.")
-        return redirect(url_for("accounts")) # Placeholder
+        return {
+            "status":"Success"
+        }
     else:
         return {
             "status":"Login credentials are missing"
@@ -238,5 +295,5 @@ def register():
 @app.errorhandler(404)
 def page_not_found(error):
     return {
-        "status":"Not Found",
+        "status":"Not found"
     }, 404
