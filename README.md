@@ -7,6 +7,7 @@ Source Code of the Silk Forum Backend using Flask and SQLite3.
 - API routes to fetch all users or posts
 - Passwords are hashed in the database
 - Error handling and redirections
+- E-Mail code verification at registration
 - Easily extensible code
 
 ## ⚙️ Usage
@@ -30,5 +31,5 @@ Next, it will ask you to enter an admin password which will be added to the `acc
 - `GET /post/` : Returns every post in the `posts.db` database
 - `GET /post/<id>` : Returns a post with a specific id
 - `POST /post/` : Adds a post to the database using a username, title and body
-- `POST /register/` : Registers a new user using a username and password
+- `POST /register/`, `POST /register/auth` : Registers a new user using a username and password
 - `POST /login/` : Log in a user and return a token if it doesn't exist or expires
