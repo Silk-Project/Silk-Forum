@@ -98,7 +98,7 @@ p_cur.close()
 # Define Email Variables
 email_port = 465
 email_sender = "silkprojectdev@gmail.com"
-email_password = "kwptszhbpvwdfhyn"
+email_password = getpass.getpass("Email API Password: ")
 subject = "Silk Forum - Verify your account"
 
 # Initialize Flask App
