@@ -2,7 +2,14 @@ from flask import Flask, request, redirect, abort, url_for, render_template
 from flask_cors import CORS
 import sqlite3
 import hashlib
+import smtplib
+import ssl
+import getpass
+from email.message import EmailMessage
 import time
+import os
+import re
+import random
 
 # Define Functions
 def hash_string(passwd):
@@ -10,6 +17,14 @@ def hash_string(passwd):
 
 def gen_Token(user, time):
     return hash_string(f"{hash_string(user)}{str(int(time))}")
+
+def delete_expired():
+    accounts = sqlite3.connect("accounts.db")
+    cur = accounts.cursor()
+    cur.execute("DELETE FROM sessions WHERE expires<?", (time.time(),))
+    cur.execute("DELETE FROM auth WHERE expires<?", (time.time(),))
+    accounts.commit()
+    cur.close()
 
 def get_Amount_of_Posts():
     posts = sqlite3.connect("posts.db")
@@ -58,16 +73,17 @@ def user_exists(user):
 # Initialize the accounts database
 acc_db = sqlite3.connect("accounts.db")
 acc_cur = acc_db.cursor()
-acc_cur.execute("CREATE TABLE IF NOT EXISTS accounts(id, user, password)")
-acc_cur.execute("CREATE TABLE IF NOT EXISTS sessions(user, token, expires)")
+acc_cur.execute("CREATE TABLE IF NOT EXISTS accounts(id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT NOT NULL, password TEXT NOT NULL, email TEXT NOT NULL)")
+acc_cur.execute("CREATE TABLE IF NOT EXISTS sessions(user TEXT NOT NULL, token TEXT NOT NULL, expires)")
+acc_cur.execute("CREATE TABLE IF NOT EXISTS auth(user TEXT NOT NULL, password_hash TEXT NOT NULL, email TEXT NOT NULL, code INTEGER, expires)")
 
 res = acc_cur.execute("SELECT * FROM accounts")
 
 if len(res.fetchall()) == 0:
-    admin_password = hash_string(input("Admin Password: "))
+    admin_password = hash_string(getpass.getpass("Admin Password: "))
     acc_cur.execute(f"""
-        INSERT INTO accounts VALUES
-        (1, "admin", "{admin_password}")
+        INSERT INTO accounts (user, password, email) VALUES
+        ("admin", "{admin_password}", "silkprojectdev@gmail.com")
     """)
     acc_db.commit()
 
@@ -76,8 +92,14 @@ acc_db.close()
 # Initialize the posts database
 p_db = sqlite3.connect("posts.db")
 p_cur = p_db.cursor()
-p_cur.execute("CREATE TABLE IF NOT EXISTS posts(id, user, title, body)")
+p_cur.execute("CREATE TABLE IF NOT EXISTS posts(id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL)")
 p_cur.close()
+
+# Define Email Variables
+email_port = 465
+email_sender = "silkprojectdev@gmail.com"
+email_password = "kwptszhbpvwdfhyn"
+subject = "Silk Forum - Verify your account"
 
 # Initialize Flask App
 app = Flask(__name__)
@@ -145,10 +167,24 @@ def accounts():
                 "status":"User not found"
             }, 404
     else:
-        return get_accounts()
+        return {
+            "status":"Success",
+            "account":get_accounts()
+        }
+    
+@app.route("/accounts/len", methods=['GET'])
+def accounts_len():
+    db = sqlite3.connect("accounts.db")
+    cur = db.cursor()
+    res = cur.execute("SELECT COUNT(*) FROM accounts")
+    accountslen = res.fetchone()
 
-        
+    print(accountslen)
 
+    return {
+        "status":"Success",
+        "accountslen":accountslen[0]
+    }
 
 @app.route("/post/", methods=['POST', 'GET'])
 def post():
@@ -173,7 +209,7 @@ def post():
             if final[1] == token and time.time() < final[2]:
                 db = sqlite3.connect("posts.db")
                 cur = db.cursor()
-                res = cur.execute("INSERT INTO posts VALUES (?,?,?,?)", (get_Amount_of_Posts()+1, final[0], title, body))
+                res = cur.execute("INSERT INTO posts (user, title, body) VALUES (?,?,?)", (final[0], title, body))
                 db.commit()
                 res.close()
                 print(f"{final[0]} created a post")
@@ -215,10 +251,14 @@ def post():
                 }, 404
 
         else:
-            return get_posts()
+            return {
+                "status":"Success",
+                "post":get_posts()
+            }
         
 @app.route("/login/", methods=['POST'])
 def login():
+    delete_expired()
     data = request.json
     username = data["user"]
     password = data["password"]
@@ -263,27 +303,69 @@ def login():
 
 @app.route("/register/", methods=['POST'])
 def register():
+    delete_expired()
     data = request.json
     username = data["user"]
     password = data["password"]
+    email = data["email"]
 
-    if username and password:
+    if username and password and email:
         if user_exists(username):
             return {
                 "status":"Account already exists"
             }, 400
-        elif len(username) < 5 or len(password) < 5:
+        elif len(password) < 5:
             return {
-                "status":"Username and password should include at least 5 characters"
+                "status":"Password should include at least 5 characters"
+            }, 400
+        elif not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
+            return {
+                "status":"E-Mail is in an invalid E-Mail format"
             }, 400
 
         print(f"Request from {username} at Register")
-        print(hash_string(password))
+
+        current_time = time.time()
+        expires = current_time + 600
+        code = random.randint(10000, 99999)
+
+        # Save authentication code and info into database
         db = sqlite3.connect("accounts.db")
         cur = db.cursor()
-        cur.execute("INSERT INTO accounts VALUES (?, ?, ?)", (get_Amount_of_Users()+1, username, hash_string(password),))
+        res = cur.execute("SELECT * FROM auth WHERE user=?", (username,))
+
+        cur.execute("INSERT INTO auth (user, password_hash, email, code, expires) VALUES (?,?,?,?,?)", (username, hash_string(password), email, code, expires))
         db.commit()
-        print("Account Added.")
+
+        # Send verification code via E-Mail
+        body = f"""
+        Here is your authentication code:
+        {code}
+
+        Please don't share this code to anyone to avoid people getting into your account.
+
+        This is an automated E-Mail. Any E-Mails that get sent to this account will get ignored. 
+        If you get spammed by this account, please report this activity to https://silk-project.github.io/contact
+        """
+
+        em = EmailMessage()
+        em["From"] = email_sender
+        em["To"] = email_sender
+        em["Subject"] = subject
+        em.set_content(body)
+
+        context = ssl.create_default_context()
+
+        try:
+            with smtplib.SMTP_SSL("smtp.gmail.com", email_port, context=context) as server:
+                server.login(email_sender, email_password)
+                server.sendmail(email_sender, email, em.as_string())
+                print("Success sending E-Mail!")
+        except:
+                print("An error occured while trying to send an authentication E-Mail.")
+
+        print("Account Authentication Active.")
+
         return {
             "status":"Success"
         }
@@ -292,6 +374,42 @@ def register():
             "status":"Login credentials are missing"
         }, 400
     
+@app.route("/register/auth", methods=['POST'])
+def auth():
+    delete_expired()
+    data = request.json
+    username = data["user"]
+    code = int(data["code"])
+
+    if username and code:
+        db = sqlite3.connect("accounts.db")
+        cur = db.cursor()
+        res = cur.execute("SELECT * FROM auth WHERE user=?", (username,))
+        auth_info = res.fetchone()
+
+        print(f"Request from {username} at Authentication")
+
+        if auth_info == None:
+            return {
+                "status":"Authentication did not happen"
+            }, 400
+        
+        if auth_info[3] == code and time.time() < auth_info[4]:
+            cur.execute("INSERT INTO accounts (user, password, email) VALUES (?,?,?)", (auth_info[0], auth_info[1], auth_info[2]))
+            db.commit()
+            print("Account added")
+            return {
+                "status":"Success"
+            }
+        else:
+            return {
+                "status":"Invalid Code"
+            }, 400
+    else:
+        return {
+            "status":"Code or / and Username is missing"
+        }, 400
+
 @app.errorhandler(404)
 def page_not_found(error):
     return {
