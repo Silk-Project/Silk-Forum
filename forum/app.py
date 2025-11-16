@@ -194,15 +194,15 @@ def post():
         body = data["body"]
         token = data["token"]
 
-        if not token:
+        if not token and not title and not body:
             return {
-                "status":"Token is missing"
+                "status":"Post content is missing"
             }, 400
 
         # Check if the user is logged in
         db = sqlite3.connect("accounts.db")
         cur = db.cursor()
-        res = cur.execute("SELECT * FROM sessions WHERE token=?", (token))
+        res = cur.execute("SELECT * FROM sessions WHERE token=?", (token,))
         final = res.fetchone()
 
         if final != None:
